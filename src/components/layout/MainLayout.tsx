@@ -1,0 +1,17 @@
+import { Outlet } from 'react-router-dom'
+import Header from './Header'
+import Sidebar from './Sidebar'
+
+export default function MainLayout() {
+  return (
+    <div className="d-flex">
+      <Sidebar />
+      <div className="flex-grow-1">
+        <Header />
+        <main className="p-4">
+          <Outlet />
+        </main>
+      </div>
+    </div>
+  )
+}
