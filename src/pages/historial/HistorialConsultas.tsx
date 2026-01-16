@@ -14,16 +14,13 @@ export default function HistorialConsultas() {
   const [paciente, setPaciente] = useState<any>(null);
   const [idEdicion, setIdEdicion] = useState<string | null>(null);
 
-  // PESTAÑA ACTIVA (Inicialmente Anamnesis)
+  // PESTAÑA ACTIVA
   const [activeTab, setActiveTab] = useState<string>("anamnesis");
 
   // ================= ESTADOS DEL FORMULARIO =================
-
-  // 1. ANAMNESIS
   const [motivoConsulta, setMotivoConsulta] = useState("");
   const [enfermedadActual, setEnfermedadActual] = useState("");
 
-  // 2. ANTECEDENTES PERINATALES
   const [productoGestacion, setProductoGestacion] = useState("");
   const [edadGestacional, setEdadGestacional] = useState<number | "">("");
   const [viaParto, setViaParto] = useState("");
@@ -32,10 +29,8 @@ export default function HistorialConsultas() {
   const [apgarMin, setApgarMin] = useState<number | "">("");
   const [apgar5, setApgar5] = useState<number | "">("");
 
-  // 3. INMUNIZACIONES
   const [estadoVacunacion, setEstadoVacunacion] = useState("");
 
-  // 4. ANTECEDENTES PERSONALES
   const enfermedadesCronicasOptions = ["Asma", "Diabetes", "Cardiopatías", "Epilepsia"];
   const [enfermedadesCronicas, setEnfermedadesCronicas] = useState<Record<string, boolean>>(
     enfermedadesCronicasOptions.reduce((acc, cur) => ({ ...acc, [cur]: false }), {})
@@ -44,19 +39,15 @@ export default function HistorialConsultas() {
   const [cirugias, setCirugias] = useState<{ si: boolean; tipo: string; fecha: string }>({ si: false, tipo: "", fecha: "" });
   const [alergias, setAlergias] = useState<{ si: boolean; tipo: string; reaccion: string }>({ si: false, tipo: "", reaccion: "" });
 
-  // 5. ANTECEDENTES FAMILIARES
   const enfermedadesFamiliaresOptions = ["HTA", "Diabetes", "Cáncer", "Enfermedades Genéticas"];
   const [enfermedadesFamiliares, setEnfermedadesFamiliares] = useState<Record<string, boolean>>(
     enfermedadesFamiliaresOptions.reduce((acc, cur) => ({ ...acc, [cur]: false }), {})
   );
-
-  // 6. DESARROLLO
   const [sostenCefalico, setSostenCefalico] = useState<number | "">("");
   const [sedestacion, setSedestacion] = useState<number | "">("");
   const [deambulacion, setDeambulacion] = useState<number | "">("");
   const [lenguaje, setLenguaje] = useState<number | "">("");
 
-  // 7. EXAMEN FÍSICO
   const [descripcionFisica, setDescripcionFisica] = useState(""); 
   const [peso, setPeso] = useState<number | "">("");
   const [talla, setTalla] = useState<number | "">("");
@@ -66,7 +57,6 @@ export default function HistorialConsultas() {
   const [pa, setPa] = useState<{ sistolica: number | ""; diastolica: number | "" }>({ sistolica: "", diastolica: "" });
   const [spo2, setSpo2] = useState<number | "">("");
   
-  // 8. DIAGNOSTICO Y PLAN
   const [notaHistorial, setNotaHistorial] = useState(""); 
   const [listaDiagnosticos, setListaDiagnosticos] = useState<DiagnosticoItem[]>([]);
   const [estudiosSolicitados, setEstudiosSolicitados] = useState("");
@@ -159,28 +149,22 @@ export default function HistorialConsultas() {
       fecha: idEdicion ? (location.state?.consultaAEditar?.fecha) : new Date().toISOString().split('T')[0],
       hora: idEdicion ? (location.state?.consultaAEditar?.hora) : new Date().toLocaleTimeString(),
       estado: "Finalizada",
-      
       motivo: motivoConsulta,
       enfermedadActual,
-      
       diagnosticoTexto: notaHistorial, 
       impresionDiagnostica: notaHistorial,
-
       examenFisico: {
           descripcion: descripcionFisica,
           peso, talla, temperatura, fc, fr, spo2, 
           presionArterial: `${pa.sistolica}/${pa.diastolica}`
       },
-
       diagnosticos: listaDiagnosticos, 
       estudiosSolicitados,
-      
       planTratamiento: {
           receta: manejoFarmacologico,
           estudios: estudiosSolicitados,
           pronostico
       },
-      
       antecedentesSnapshot: {
         enfermedadesCronicas, hospitalizaciones, cirugias, alergias, enfermedadesFamiliares, 
         antecedentesPerinatales: { 
@@ -207,11 +191,15 @@ export default function HistorialConsultas() {
   const consultasPasadas = paciente?.historiaClinica?.filter((c: any) => c.estado !== 'Agendada') || [];
 
   return (
-    <div className="d-flex" style={{ height: '100vh', overflow: 'hidden', backgroundColor: '#f8f9fa' }}>
+    <div className="d-flex flex-column" style={{ height: '100vh', overflow: 'hidden', backgroundColor: '#f8f9fa' }}>
       
-      {/* COLUMNA IZQUIERDA (FORMULARIO) */}
-      <div className="flex-grow-1 p-4 overflow-auto" style={{ height: '100%' }}>
-          <div className="d-flex justify-content-between align-items-center mb-4">
+      {/* ========================================================================= */}
+      {/* 1. SECCIÓN SUPERIOR: FORMULARIO (OCUPA LA MAYOR PARTE)                    */}
+      {/* ========================================================================= */}
+      <div className="flex-grow-1 p-4 d-flex flex-column" style={{ overflow: 'hidden' }}>
+          
+          {/* HEADER */}
+          <div className="flex-shrink-0 d-flex justify-content-between align-items-center mb-4">
              <div>
                 <button className="btn btn-outline-secondary btn-sm mb-2" onClick={() => navigate(-1)}>← Volver</button>
                 <h4 className="fw-bold text-primary">
@@ -224,8 +212,8 @@ export default function HistorialConsultas() {
              </button>
           </div>
 
-          {/* === TABS CON FLEX-WRAP === */}
-          <ul className="nav nav-tabs mb-3 d-flex flex-wrap" style={{ borderBottom: '1px solid #dee2e6' }}>
+          {/* TABS */}
+          <ul className="nav nav-tabs mb-0 flex-shrink-0 d-flex flex-wrap" style={{ borderBottom: 'none' }}>
              {[ 
                { id: "anamnesis", label: "Anamnesis" }, 
                { id: "antecedentesPerinatales", label: "Ant. Perinatales" }, 
@@ -240,6 +228,7 @@ export default function HistorialConsultas() {
                      <button 
                         className={`nav-link ${activeTab === tab.id ? 'active fw-bold' : ''}`} 
                         onClick={() => setActiveTab(tab.id)}
+                        style={activeTab === tab.id ? { backgroundColor: 'white', borderBottomColor: 'white' } : {}}
                      >
                         {tab.label}
                      </button>
@@ -247,7 +236,8 @@ export default function HistorialConsultas() {
              ))}
           </ul>
 
-          <div className="card p-4 shadow-sm border-0 mb-5" style={{ minHeight: "60vh", backgroundColor: 'white' }}>
+          {/* CONTENIDO DEL FORMULARIO (SCROLL INTERNO) */}
+          <div className="card p-4 shadow-sm border-0 flex-grow-1 overflow-auto" style={{ backgroundColor: 'white', borderTopLeftRadius: 0 }}>
              
              {/* 1. ANAMNESIS */}
              {activeTab === "anamnesis" && (
@@ -315,7 +305,6 @@ export default function HistorialConsultas() {
              {/* 7. EXAMEN FÍSICO */}
              {activeTab === "examenFisico" && (
                  <>
-                    {/* Signos Vitales */}
                     <div className="row g-3 mb-4 p-3 bg-light rounded border">
                         <h6 className="text-primary mb-2">Signos Vitales y Antropometría</h6>
                         <div className="col-2"><label className="small">Peso (kg)</label><input className="form-control form-control-sm" type="number" value={peso} onChange={e=>setPeso(Number(e.target.value))}/></div>
@@ -345,7 +334,7 @@ export default function HistorialConsultas() {
                  </>
              )}
 
-             {/* 8. DIAGNÓSTICO (LIMPIO) */}
+             {/* 8. DIAGNÓSTICO */}
              {activeTab === "diagnosticoPlan" && (
                 <>
                     {/* CIE-10 */}
@@ -361,7 +350,7 @@ export default function HistorialConsultas() {
                         <button className="btn btn-sm btn-outline-primary" onClick={agregarFilaDiagnostico}>+ Agregar CIE-10</button>
                     </div>
 
-                    {/* --- EDITOR DE TEXTO LIMPIO (SIN BOTONES NI FOOTER) --- */}
+                    {/* --- EDITOR DE TEXTO LIMPIO --- */}
                     <div className="card mb-4" style={{border: '1px solid #dee2e6'}}>
                         <div className="card-header bg-white py-2">
                             <span className="fw-bold text-uppercase" style={{fontSize: '0.85rem', color: '#555', letterSpacing: '0.5px'}}>
@@ -403,28 +392,36 @@ export default function HistorialConsultas() {
           </div>
       </div>
 
-      {/* COLUMNA DERECHA (SIDEBAR HISTORIAL) */}
-      <div className="bg-white border-start shadow-sm p-3 d-none d-xl-block" style={{ width: '320px', overflowY: 'auto' }}>
-            <button className="btn btn-success w-100 mb-4 fw-bold py-2 shadow-sm" onClick={handleNuevaConsulta}>
-                + INICIAR NUEVA CONSULTA
-            </button>
-            <h6 className="text-success fw-bold px-2">HISTORIAL</h6>
-            <div className="px-2 border-start border-3 border-success ms-2">
+      {/* ========================================================================= */}
+      {/* 2. SECCIÓN INFERIOR: HISTORIAL Y NUEVA CONSULTA (FOOTER)                  */}
+      {/* ========================================================================= */}
+      <div className="bg-white border-top shadow-sm p-4 d-flex flex-column" style={{ minHeight: '250px', maxHeight: '350px', overflowY: 'auto' }}>
+            <div className="d-flex justify-content-between align-items-center mb-3">
+                <h6 className="text-success fw-bold m-0"><i className="bi bi-clock-history me-2"></i>HISTORIAL DE CONSULTAS</h6>
+                <button className="btn btn-success fw-bold btn-sm" onClick={handleNuevaConsulta}>
+                    + INICIAR NUEVA CONSULTA
+                </button>
+            </div>
+            
+            {/* Lista Horizontal de Historial (Grid) */}
+            <div className="row g-3">
                 {consultasPasadas.slice().reverse().map((hist: any, i: number) => (
-                    <div key={i} className={`mb-3 p-3 rounded border shadow-sm ${idEdicion === hist.id ? 'bg-warning bg-opacity-10 border-warning' : 'bg-light'}`}>
-                        <div className="d-flex justify-content-between mb-1">
-                            <span className="fw-bold">{hist.fecha}</span>
-                            <button className="btn btn-sm btn-link p-0" onClick={() => {
-                                navigate('.', { state: { consultaAEditar: hist } });
-                                window.location.reload();
-                            }}>Editar</button>
+                    <div key={i} className="col-md-6 col-lg-4 col-xl-3">
+                        <div className={`p-3 rounded border h-100 ${idEdicion === hist.id ? 'bg-warning bg-opacity-10 border-warning' : 'bg-light'}`}>
+                            <div className="d-flex justify-content-between mb-1">
+                                <span className="fw-bold">{hist.fecha}</span>
+                                <button className="btn btn-sm btn-link p-0" onClick={() => {
+                                    navigate('.', { state: { consultaAEditar: hist } });
+                                    window.location.reload();
+                                }}>Editar</button>
+                            </div>
+                            <strong className="d-block text-primary small text-truncate">{hist.motivo}</strong>
+                            {hist.examenFisico?.descripcion && (
+                                <p className="small text-muted mt-2 mb-0 border-top pt-2 text-truncate">
+                                    {hist.examenFisico.descripcion}
+                                </p>
+                            )}
                         </div>
-                        <strong className="d-block text-primary small">{hist.motivo}</strong>
-                        {hist.examenFisico?.descripcion && (
-                            <p className="small text-muted mt-2 mb-0 border-top pt-2 text-truncate">
-                                <strong>Ex:</strong> {hist.examenFisico.descripcion}
-                            </p>
-                        )}
                     </div>
                 ))}
             </div>
