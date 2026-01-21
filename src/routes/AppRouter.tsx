@@ -7,6 +7,7 @@ import RegistroPaciente from '../pages/pacientes/RegistroPaciente';
 import ConsultaPacientes from '../pages/pacientes/ConsultaPacientes';
 import ActualizarPaciente from '../pages/pacientes/ActualizarPaciente';
 import HistorialConsultas from '../pages/historial/HistorialConsultas';
+import VerHistorialCompleto from '../pages/historial/VerHistorialCompleto';
 
 
 // Dentro de tus <Routes>
@@ -27,6 +28,7 @@ export default function AppRouter() {
           <Route path="/pacientes/actualizar" element={<ActualizarPaciente />} />
           <Route path="/historial" element={<HistorialConsultas />} />
           <Route path="/historial/:cedula" element={<HistorialConsultas />} />
+          <Route path="/historial-completo/:cedula" element={<VerHistorialCompleto />} />
         </Route>
       </Routes>
     </BrowserRouter>
