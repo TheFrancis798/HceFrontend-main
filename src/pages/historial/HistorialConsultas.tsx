@@ -23,26 +23,76 @@ const validarFechaNoFutura = (fecha: string) => {
     return fecha <= hoy;
 };
 
+// --- NUEVAS FUNCIONES DE CÁLCULO ---
+
+const calcularEdadMeses = (fechaNacimiento: string) => {
+    if (!fechaNacimiento) return 0;
+    const nac = new Date(fechaNacimiento);
+    const hoy = new Date();
+    let meses = (hoy.getFullYear() - nac.getFullYear()) * 12;
+    meses += hoy.getMonth() - nac.getMonth();
+    return meses <= 0 ? 0 : meses;
+};
+
 const calcularIMC = (peso: number, tallaCm: number) => {
     if (!peso || !tallaCm || tallaCm <= 0) return { valor: "", categoria: "", color: "" };
     const tallaM = tallaCm / 100;
     const imc = peso / (tallaM * tallaM);
-    const imcFixed = imc.toFixed(2);
+    const valor = imc.toFixed(2);
     let categoria = ""; let color = "";
+    
     if (imc < 18.5) { categoria = "Bajo Peso"; color = "text-danger fw-bold"; }
-    else if (imc >= 18.5 && imc < 24.9) { categoria = "Peso Saludable"; color = "text-success fw-bold"; }
-    else if (imc >= 25 && imc < 29.9) { categoria = "Sobrepeso"; color = "text-warning fw-bold"; }
+    else if (imc < 25) { categoria = "Eutrófico"; color = "text-success fw-bold"; }
+    else if (imc < 30) { categoria = "Sobrepeso"; color = "text-warning fw-bold"; }
     else { categoria = "Obesidad"; color = "text-danger fw-bold"; }
-    return { valor: imcFixed, categoria, color };
+    
+    return { valor, categoria, color };
 };
 
-const calcularZScore = (tipo: 'PesoEdad' | 'PesoTalla', peso: number, talla: number) => {
-    if (!peso || (tipo === 'PesoTalla' && !talla)) return { valor: "", color: "" };
-    let media = tipo === 'PesoEdad' ? 10 : (talla - 50) * 0.3 + 3; 
-    let sd = tipo === 'PesoEdad' ? 1.5 : 1.2;
-    const z = (peso - media) / sd;
-    const color = (z < -2 || z > 2) ? "text-danger" : "text-success"; 
-    return { valor: (z > 0 ? "+" : "") + z.toFixed(2) + " SD", color };
+// Función unificada para Z-Score (Puntuación Z) mejorada
+const obtenerZScore = (tipo: 'Peso/Edad' | 'Talla/Edad' | 'IMC/Edad', valor: number, edadMeses: number) => {
+    if (!valor || edadMeses === undefined) return { valor: "", interpretacion: "", color: "" };
+
+    // --- VALIDACIÓN DE EDAD ADULTA (> 19 AÑOS / 228 MESES) ---
+    if (edadMeses > 228) {
+        return { 
+            valor: "N/A", 
+            interpretacion: "Paciente Adulto", 
+            color: "text-secondary" 
+        };
+    }
+    // ---------------------------------------------------------
+
+    // Valores de referencia simplificados (Basados en promedios OMS para el cálculo de SD)
+    let media = 0;
+    let ds = 1;
+
+    if (tipo === 'Peso/Edad') {
+        media = edadMeses < 12 ? 3.5 + (edadMeses * 0.6) : 10 + ((edadMeses - 12) * 0.2);
+        ds = media * 0.12; 
+    } else if (tipo === 'Talla/Edad') {
+        media = 50 + (edadMeses * 1.5); 
+        ds = media * 0.04;
+    } else if (tipo === 'IMC/Edad') {
+        media = 16;
+        ds = 1.5;
+    }
+
+    const z = (valor - media) / ds;
+    const valorZ = (z > 0 ? "+" : "") + z.toFixed(2);
+    
+    let interpretacion = "Normal";
+    let color = "text-success fw-bold";
+
+    if (z > 2 || z < -2) { 
+        color = "text-danger fw-bold"; 
+        interpretacion = z > 2 ? "Desviación Superior" : "Desviación Inferior";
+    } else if (z > 1 || z < -1) {
+        color = "text-warning fw-bold";
+        interpretacion = "Riesgo / Límite";
+    }
+
+    return { valor: `${valorZ} SD`, interpretacion, color };
 };
 
 export default function HistorialConsultas() {
@@ -147,9 +197,12 @@ export default function HistorialConsultas() {
   // 6. EXAMEN FÍSICO
   const [signosVitales, setSignosVitales] = useState({ peso: "", talla: "", perimetroCefalico: "", temperatura: "", fc: "", fr: "", spo2: "", paSistolica: "", paDiastolica: "" });
   const [esMenor3Anios, setEsMenor3Anios] = useState(false);
+  
+  // --- NUEVOS ESTADOS DE CÁLCULO ---
   const [resultadoIMC, setResultadoIMC] = useState({ valor: "", categoria: "", color: "" });
-  const [zScorePesoEdad, setZScorePesoEdad] = useState({ valor: "", color: "" });
-  const [zScorePesoTalla, setZScorePesoTalla] = useState({ valor: "", color: "" });
+  const [zPesoEdad, setZPesoEdad] = useState({ valor: "", interpretacion: "", color: "" });
+  const [zTallaEdad, setZTallaEdad] = useState({ valor: "", interpretacion: "", color: "" });
+  const [zIMCEdad, setZIMCEdad] = useState({ valor: "", interpretacion: "", color: "" });
 
   const [aspectoGeneralTexto, setAspectoGeneralTexto] = useState("");
   const [aspectoGeneralChecks, setAspectoGeneralChecks] = useState({ consciente: false, alerta: false, activo: false, decaido: false, otros: false });
@@ -163,19 +216,25 @@ export default function HistorialConsultas() {
   const [neuroChecks, setNeuroChecks] = useState({ reflejos: false, estadoMental: false, tono: false });
   const [evolucionClinica, setEvolucionClinica] = useState("");
 
+  // --- EFECTO CORREGIDO PARA CÁLCULOS Z-SCORE ---
   useEffect(() => {
       const peso = parseFloat(signosVitales.peso);
       const talla = parseFloat(signosVitales.talla);
+      const edadMeses = paciente ? calcularEdadMeses(paciente.fechaNacimiento) : 0;
+
       if (peso && talla) {
-          setResultadoIMC(calcularIMC(peso, talla));
-          setZScorePesoEdad(calcularZScore('PesoEdad', peso, talla));
-          setZScorePesoTalla(calcularZScore('PesoTalla', peso, talla));
+          const resIMC = calcularIMC(peso, talla);
+          setResultadoIMC(resIMC);
+          setZPesoEdad(obtenerZScore('Peso/Edad', peso, edadMeses));
+          setZTallaEdad(obtenerZScore('Talla/Edad', talla, edadMeses));
+          setZIMCEdad(obtenerZScore('IMC/Edad', parseFloat(resIMC.valor), edadMeses));
       } else {
           setResultadoIMC({ valor: "", categoria: "", color: "" });
-          setZScorePesoEdad({ valor: "", color: "" });
-          setZScorePesoTalla({ valor: "", color: "" });
+          setZPesoEdad({ valor: "", interpretacion: "", color: "" });
+          setZTallaEdad({ valor: "", interpretacion: "", color: "" });
+          setZIMCEdad({ valor: "", interpretacion: "", color: "" });
       }
-  }, [signosVitales.peso, signosVitales.talla]);
+  }, [signosVitales.peso, signosVitales.talla, paciente]);
 
   // 7. DIAGNÓSTICO
   const [diagnosticoPrincipal, setDiagnosticoPrincipal] = useState<DiagnosticoItem>({ id: uuidv4(), cie10: '', descripcion: '', tipo: 'Presuntivo' });
@@ -353,7 +412,8 @@ export default function HistorialConsultas() {
       },
       examenFisico: {
           vitales: signosVitales,
-          calculos: { imc: resultadoIMC, zPesoEdad: zScorePesoEdad, zPesoTalla: zScorePesoTalla },
+          // AQUÍ SE GUARDAN LOS NUEVOS CÁLCULOS
+          calculos: { imc: resultadoIMC, zPesoEdad, zTallaEdad, zIMCEdad },
           segmentario: { 
               aspectoGeneralTexto, aspectoGeneralChecks, aspectoGeneralOtros,
               pielChecks, pielOtros, cabezaChecks, cabezaOtros, cardioChecks, abdomenChecks, neuroChecks,
@@ -474,8 +534,111 @@ export default function HistorialConsultas() {
             <div className="mb-4 p-3 bg-light rounded border"><div className="d-flex align-items-center mb-2 gap-3"><label className="fw-bold text-secondary m-0">Cirugías</label><button className="btn btn-sm btn-primary" onClick={agregarCirugia}>+ Agregar</button></div>{listaCirugias.map((item) => (<div key={item.id} className="row g-2 mb-2 align-items-center"><div className="col-md-7"><input className="form-control form-control-sm" placeholder="Tipo" value={item.descripcion} onChange={e => actualizarCirugia(item.id, 'descripcion', e.target.value)} /></div><div className="col-md-4"><input type="date" className="form-control form-control-sm" value={item.fecha} onChange={e => actualizarCirugia(item.id, 'fecha', e.target.value)} /></div><div className="col-md-1"><button className="btn btn-sm btn-outline-danger w-100" onClick={() => eliminarCirugia(item.id)}>X</button></div></div>))}</div><div className="mb-3 p-3 bg-light rounded border"><div className="d-flex align-items-center mb-2 gap-3"><label className="fw-bold text-secondary m-0">Hospitalizaciones</label><button className="btn btn-sm btn-primary" onClick={agregarHospitalizacion}>+ Agregar</button></div>{listaHospitalizaciones.map((item) => (<div key={item.id} className="row g-2 mb-2 align-items-center"><div className="col-md-7"><input className="form-control form-control-sm" placeholder="Causa" value={item.descripcion} onChange={e => actualizarHospitalizacion(item.id, 'descripcion', e.target.value)} /></div><div className="col-md-4"><input type="date" className="form-control form-control-sm" value={item.fecha} onChange={e => actualizarHospitalizacion(item.id, 'fecha', e.target.value)} /></div><div className="col-md-1"><button className="btn btn-sm btn-outline-danger w-100" onClick={() => eliminarHospitalizacion(item.id)}>X</button></div></div>))}</div></>)}
             
             {activeTab === "antecedentesFamiliares" && modoCompleto && (<><h6 className="fw-bold text-primary mb-3 border-bottom pb-2">Familiares</h6><div className="d-flex flex-column gap-2 mb-3">{Object.keys(enfermedadesFamiliares).map(k=>(<div className="form-check" key={k}><input type="checkbox" className="form-check-input" checked={enfermedadesFamiliares[k]} onChange={()=>setEnfermedadesFamiliares({...enfermedadesFamiliares, [k]: !enfermedadesFamiliares[k]})}/><label className="form-check-label">{k}</label></div>))}</div><div className="mb-3"><button className="btn btn-sm btn-outline-secondary mb-3" onClick={() => setMostrarTablaFamiliares(!mostrarTablaFamiliares)}>{mostrarTablaFamiliares ? "- Ocultar" : "+ Más (Tabla)"}</button></div>{mostrarTablaFamiliares && (<div className="card p-3 bg-light border mb-3"><h6 className="small fw-bold text-secondary mb-2">Otras Enfermedades Familiares</h6>{listaFamiliaresExtra.map((item) => (<div key={item.id} className="row g-2 mb-2 align-items-center"><div className="col-md-2"><input className="form-control form-control-sm" placeholder="CIE-10" value={item.cie10} onChange={e => actualizarFamiliarExtra(item.id, 'cie10', e.target.value)} /></div><div className="col-md-5"><input className="form-control form-control-sm" placeholder="Desc" value={item.descripcion} onChange={e => actualizarFamiliarExtra(item.id, 'descripcion', e.target.value)} /></div><div className="col-md-3"><input type="date" className="form-control form-control-sm" value={item.fecha} onChange={e => actualizarFamiliarExtra(item.id, 'fecha', e.target.value)} /></div><div className="col-md-2"><button className="btn btn-sm btn-danger w-100" onClick={() => eliminarFamiliarExtra(item.id)}>X</button></div></div>))}<button className="btn btn-sm btn-primary mt-1" onClick={agregarFamiliarExtra}>+ Agregar Fila</button></div>)}<div className="mt-2"><textarea className="form-control" rows={1} placeholder="Observaciones..." value={descripcionFamiliares} onChange={e => setDescripcionFamiliares(e.target.value)} /></div></>)}
-            {activeTab === "desarrollo" && modoCompleto && (<div className="row g-3"><div className="col-12 border-bottom pb-2 mb-2"><h6 className="fw-bold text-primary m-0">Desarrollo Psicomotor</h6></div><div className="col-md-3"><label>Sostén Cefálico</label><input type="number" className="form-control" value={desarrollo.sostenCefalico} onChange={e=>setDesarrollo({...desarrollo, sostenCefalico:e.target.value})} /></div><div className="col-md-3"><label>Sedestación</label><input type="number" className="form-control" value={desarrollo.sedestacion} onChange={e=>setDesarrollo({...desarrollo, sedestacion:e.target.value})} /></div><div className="col-md-3"><label>Deambulación</label><input type="number" className="form-control" value={desarrollo.deambulacion} onChange={e=>setDesarrollo({...desarrollo, deambulacion:e.target.value})} /></div><div className="col-md-3"><label>Lenguaje</label><input type="number" className="form-control" value={desarrollo.lenguaje} onChange={e=>setDesarrollo({...desarrollo, lenguaje:e.target.value})} /></div><div className="col-12 mt-3"><h6 className="fw-bold text-secondary border-bottom pb-2">Alimentación</h6><div className="row g-3"><div className="col-md-4"><div className="form-check mb-2"><input className="form-check-input" type="checkbox" checked={alimentacion.lactancia.checked} onChange={e => setAlimentacion({ ...alimentacion, lactancia: { ...alimentacion.lactancia, checked: e.target.checked } })} /><label className="form-check-label fw-bold">Lactancia Materna</label></div>{alimentacion.lactancia.checked && (<input type="text" className="form-control form-control-sm" placeholder="Duración (meses)" value={alimentacion.lactancia.duracion} onChange={e => setAlimentacion({ ...alimentacion, lactancia: { ...alimentacion.lactancia, duracion: e.target.value } })} />)}</div><div className="col-md-4"><div className="form-check mb-2"><input className="form-check-input" type="checkbox" checked={alimentacion.formula.checked} onChange={e => setAlimentacion({ ...alimentacion, formula: { ...alimentacion.formula, checked: e.target.checked } })} /><label className="form-check-label fw-bold">Fórmula</label></div>{alimentacion.formula.checked && (<input type="text" className="form-control form-control-sm" placeholder="Tipo" value={alimentacion.formula.tipo} onChange={e => setAlimentacion({ ...alimentacion, formula: { ...alimentacion.formula, tipo: e.target.value } })} />)}</div><div className="col-md-4"><div className="form-check mb-2"><input className="form-check-input" type="checkbox" checked={alimentacion.ablactacion.checked} onChange={e => setAlimentacion({ ...alimentacion, ablactacion: { ...alimentacion.ablactacion, checked: e.target.checked } })} /><label className="form-check-label fw-bold">Ablactación</label></div>{alimentacion.ablactacion.checked && (<input type="text" className="form-control form-control-sm" placeholder="Edad de inicio" value={alimentacion.ablactacion.edadInicio} onChange={e => setAlimentacion({ ...alimentacion, ablactacion: { ...alimentacion.ablactacion, edadInicio: e.target.value } })} />)}</div></div></div></div>)}
-            {activeTab === "examenFisico" && (<><div className="card bg-light mb-4 border-0"><div className="card-body p-3"><h6 className="text-primary mb-3 small fw-bold text-uppercase">A. Signos Vitales</h6><div className="row g-3 text-center mb-3"><div className="col"><label className="small d-block fw-bold">Peso (kg)</label><input type="number" className="form-control form-control-sm text-center fw-bold text-primary" value={signosVitales.peso} onChange={e=>setSignosVitales({...signosVitales, peso:e.target.value})}/></div><div className="col"><label className="small d-block fw-bold">Talla (cm)</label><input type="number" className="form-control form-control-sm text-center fw-bold text-primary" value={signosVitales.talla} onChange={e=>setSignosVitales({...signosVitales, talla:e.target.value})}/></div><div className="col"><div className="form-check form-switch d-flex justify-content-center gap-2 mb-1"><input className="form-check-input" type="checkbox" checked={esMenor3Anios} onChange={e => setEsMenor3Anios(e.target.checked)}/><label className="small" style={{fontSize: '0.7rem'}}>¿≤ 3 años?</label></div>{esMenor3Anios ? (<input type="number" className="form-control form-control-sm text-center" placeholder="P. Cefálico" value={signosVitales.perimetroCefalico} onChange={e=>setSignosVitales({...signosVitales, perimetroCefalico:e.target.value})}/>) : (<input className="form-control form-control-sm text-center bg-light" disabled value="-" />)}</div><div className="col"><label className="small d-block">Temp (°C)</label><input className="form-control form-control-sm text-center" value={signosVitales.temperatura} onChange={e=>setSignosVitales({...signosVitales, temperatura:e.target.value})}/></div><div className="col"><label className="small d-block">FC (lpm)</label><input className="form-control form-control-sm text-center" value={signosVitales.fc} onChange={e=>setSignosVitales({...signosVitales, fc:e.target.value})}/></div><div className="col"><label className="small d-block">FR (rpm)</label><input className="form-control form-control-sm text-center" value={signosVitales.fr} onChange={e=>setSignosVitales({...signosVitales, fr:e.target.value})}/></div><div className="col"><label className="small d-block">SpO2 (%)</label><input className="form-control form-control-sm text-center" value={signosVitales.spo2} onChange={e=>setSignosVitales({...signosVitales, spo2:e.target.value})}/></div></div><div className="row g-3 mb-3 justify-content-center"><div className="col-md-3"><label className="small d-block fw-bold text-secondary">PA Sistólica</label><div className="input-group input-group-sm"><input type="number" className="form-control text-center" value={signosVitales.paSistolica} onChange={e=>setSignosVitales({...signosVitales, paSistolica:e.target.value})}/><span className="input-group-text">mmHg</span></div></div><div className="col-md-3"><label className="small d-block fw-bold text-secondary">PA Diastólica</label><div className="input-group input-group-sm"><input type="number" className="form-control text-center" value={signosVitales.paDiastolica} onChange={e=>setSignosVitales({...signosVitales, paDiastolica:e.target.value})}/><span className="input-group-text">mmHg</span></div></div></div><div className="row g-2 mt-2 pt-2 border-top"><div className="col-12"><h6 className="small fw-bold text-success mb-2">Evaluación Nutricional</h6></div><div className="col-md-4"><div className="border rounded p-2 bg-white text-center h-100"><small className="d-block text-muted">IMC</small><div className="fw-bold fs-5">{resultadoIMC.valor || "--"}</div><span className={resultadoIMC.color || "text-secondary"}>{resultadoIMC.categoria || "Pendiente"}</span></div></div><div className="col-md-4"><div className="border rounded p-2 bg-white text-center h-100"><small className="d-block text-muted">Z-Score Peso/Edad</small><div className={`fw-bold fs-5 ${zScorePesoEdad.color}`}>{zScorePesoEdad.valor || "--"}</div><small className="text-muted" style={{fontSize: '0.7rem'}}>*Referencial</small></div></div><div className="col-md-4"><div className="border rounded p-2 bg-white text-center h-100"><small className="d-block text-muted">Z-Score Peso/Talla</small><div className={`fw-bold fs-5 ${zScorePesoTalla.color}`}>{zScorePesoTalla.valor || "--"}</div><small className="text-muted" style={{fontSize: '0.7rem'}}>*Referencial</small></div></div></div></div></div><h6 className="text-primary mb-3 border-bottom pb-2">B. Examen Físico Segmentario</h6><div className="row g-4"><div className="col-md-6"><div className="card h-100 border-light shadow-sm"><div className="card-header bg-white fw-bold small">Aspecto General</div><div className="card-body"><input className="form-control form-control-sm mb-2" placeholder="Texto libre corto..." value={aspectoGeneralTexto} onChange={e=>setAspectoGeneralTexto(e.target.value)} /><div className="d-flex flex-wrap gap-2 mb-2">{['consciente', 'alerta', 'activo', 'decaido'].map(k => (<div className="form-check" key={k}><input className="form-check-input" type="checkbox" checked={aspectoGeneralChecks[k as keyof typeof aspectoGeneralChecks]} onChange={e => setAspectoGeneralChecks({...aspectoGeneralChecks, [k]: e.target.checked})} /><label className="form-check-label small text-capitalize">{k}</label></div>))}</div><div className="form-check mb-1"><input className="form-check-input" type="checkbox" checked={aspectoGeneralChecks.otros} onChange={e => setAspectoGeneralChecks({...aspectoGeneralChecks, otros: e.target.checked})} /><label className="form-check-label small">Otros</label></div>{aspectoGeneralChecks.otros && <input className="form-control form-control-sm mt-1" placeholder="Especifique..." value={aspectoGeneralOtros} onChange={e=>setAspectoGeneralOtros(e.target.value)} />}</div></div></div><div className="col-md-6"><div className="card h-100 border-light shadow-sm"><div className="card-header bg-white fw-bold small">Piel y Faneras</div><div className="card-body"><div className="d-flex flex-wrap gap-3 mb-2">{['ictericia', 'cianosis', 'rash'].map(k => (<div className="form-check" key={k}><input className="form-check-input" type="checkbox" checked={pielChecks[k as keyof typeof pielChecks]} onChange={e => setPielChecks({...pielChecks, [k]: e.target.checked})} /><label className="form-check-label small text-capitalize">{k}</label></div>))}</div><div className="form-check"><input className="form-check-input" type="checkbox" checked={pielChecks.otros} onChange={e => setPielChecks({...pielChecks, otros: e.target.checked})} /><label className="form-check-label small">Otros</label></div>{pielChecks.otros && <input className="form-control form-control-sm mt-1" placeholder="Especifique..." value={pielOtros} onChange={e=>setPielOtros(e.target.value)} />}</div></div></div><div className="col-md-6"><div className="card h-100 border-light shadow-sm"><div className="card-header bg-white fw-bold small">Cabeza y Cuello</div><div className="card-body"><div className="d-flex flex-wrap gap-3 mb-2"><div className="form-check"><input className="form-check-input" type="checkbox" checked={cabezaChecks.fontanela} onChange={e => setCabezaChecks({...cabezaChecks, fontanela: e.target.checked})} /><label className="form-check-label small">Fontanela anterior</label></div><div className="form-check"><input className="form-check-input" type="checkbox" checked={cabezaChecks.adenopatias} onChange={e => setCabezaChecks({...cabezaChecks, adenopatias: e.target.checked})} /><label className="form-check-label small">Adenopatías</label></div></div><div className="form-check"><input className="form-check-input" type="checkbox" checked={cabezaChecks.otros} onChange={e => setCabezaChecks({...cabezaChecks, otros: e.target.checked})} /><label className="form-check-label small">Otros</label></div>{cabezaChecks.otros && <input className="form-control form-control-sm mt-1" placeholder="Especifique..." value={cabezaOtros} onChange={e=>setCabezaOtros(e.target.value)} />}</div></div></div><div className="col-md-6"><div className="card h-100 border-light shadow-sm"><div className="card-header bg-white fw-bold small">Cardiopulmonar</div><div className="card-body"><div className="row g-2">{['Ruidos cardiacos', 'Murmullos vesiculares', 'Soplos', 'Crepitantes'].map((label, idx) => { const key = ['ruidos', 'murmullos', 'soplos', 'crepitantes'][idx]; return (<div className="col-6" key={key}><div className="form-check"><input className="form-check-input" type="checkbox" checked={cardioChecks[key as keyof typeof cardioChecks]} onChange={e => setCardioChecks({...cardioChecks, [key]: e.target.checked})} /><label className="form-check-label small">{label}</label></div></div>); })}</div></div></div></div><div className="col-md-6"><div className="card h-100 border-light shadow-sm"><div className="card-header bg-white fw-bold small">Abdomen</div><div className="card-body"><div className="row g-2">{['Blando', 'Depresible', 'Dolor a la palpación', 'Hepatomegalia', 'Esplenomegalia'].map((label, idx) => { const key = ['blando', 'depresible', 'dolor', 'hepatomegalia', 'esplenomegalia'][idx]; return (<div className="col-6" key={key}><div className="form-check"><input className="form-check-input" type="checkbox" checked={abdomenChecks[key as keyof typeof abdomenChecks]} onChange={e => setAbdomenChecks({...abdomenChecks, [key]: e.target.checked})} /><label className="form-check-label small">{label}</label></div></div>); })}</div></div></div></div><div className="col-md-6"><div className="card h-100 border-light shadow-sm"><div className="card-header bg-white fw-bold small">Neurológico</div><div className="card-body"><div className="d-flex flex-column gap-2"><div className="form-check"><input className="form-check-input" type="checkbox" checked={neuroChecks.reflejos} onChange={e => setNeuroChecks({...neuroChecks, reflejos: e.target.checked})} /><label className="form-check-label small">Reflejos osteotendinosos</label></div><div className="form-check"><input className="form-check-input" type="checkbox" checked={neuroChecks.estadoMental} onChange={e => setNeuroChecks({...neuroChecks, estadoMental: e.target.checked})} /><label className="form-check-label small">Estado mental</label></div><div className="form-check"><input className="form-check-input" type="checkbox" checked={neuroChecks.tono} onChange={e => setNeuroChecks({...neuroChecks, tono: e.target.checked})} /><label className="form-check-label small">Tono muscular</label></div></div></div></div></div><div className="col-12 mt-2"><label className="fw-bold text-success">Evolución Clínica</label><textarea className="form-control border-success" rows={3} value={evolucionClinica} onChange={e=>setEvolucionClinica(e.target.value)}/></div></div></>)}
+            
+            {/* ===================================================================================== */}
+            {/* ======================= CAMBIO REALIZADO AQUI EN TAB DESARROLLO ===================== */}
+            {/* ===================================================================================== */}
+            {activeTab === "desarrollo" && modoCompleto && (
+                <div className="row g-3">
+                    <div className="col-12 border-bottom pb-2 mb-2"><h6 className="fw-bold text-primary m-0">Desarrollo Psicomotor</h6></div>
+                    
+                    {/* ETIQUETAS ACTUALIZADAS CON "(edad en meses)" */}
+                    <div className="col-md-3"><label className="small">Sostén Cefálico (edad en meses)</label><input type="number" className="form-control" value={desarrollo.sostenCefalico} onChange={e=>setDesarrollo({...desarrollo, sostenCefalico:e.target.value})} /></div>
+                    <div className="col-md-3"><label className="small">Sedestación (edad en meses)</label><input type="number" className="form-control" value={desarrollo.sedestacion} onChange={e=>setDesarrollo({...desarrollo, sedestacion:e.target.value})} /></div>
+                    <div className="col-md-3"><label className="small">Deambulación (edad en meses)</label><input type="number" className="form-control" value={desarrollo.deambulacion} onChange={e=>setDesarrollo({...desarrollo, deambulacion:e.target.value})} /></div>
+                    <div className="col-md-3"><label className="small">Lenguaje (edad en meses)</label><input type="number" className="form-control" value={desarrollo.lenguaje} onChange={e=>setDesarrollo({...desarrollo, lenguaje:e.target.value})} /></div>
+                    
+                    <div className="col-12 mt-3"><h6 className="fw-bold text-secondary border-bottom pb-2">Alimentación</h6>
+                        <div className="row g-3">
+                            <div className="col-md-4"><div className="form-check mb-2"><input className="form-check-input" type="checkbox" checked={alimentacion.lactancia.checked} onChange={e => setAlimentacion({ ...alimentacion, lactancia: { ...alimentacion.lactancia, checked: e.target.checked } })} /><label className="form-check-label fw-bold">Lactancia Materna</label></div>{alimentacion.lactancia.checked && (<input type="text" className="form-control form-control-sm" placeholder="Duración (meses)" value={alimentacion.lactancia.duracion} onChange={e => setAlimentacion({ ...alimentacion, lactancia: { ...alimentacion.lactancia, duracion: e.target.value } })} />)}</div>
+                            <div className="col-md-4"><div className="form-check mb-2"><input className="form-check-input" type="checkbox" checked={alimentacion.formula.checked} onChange={e => setAlimentacion({ ...alimentacion, formula: { ...alimentacion.formula, checked: e.target.checked } })} /><label className="form-check-label fw-bold">Fórmula</label></div>{alimentacion.formula.checked && (<input type="text" className="form-control form-control-sm" placeholder="Tipo" value={alimentacion.formula.tipo} onChange={e => setAlimentacion({ ...alimentacion, formula: { ...alimentacion.formula, tipo: e.target.value } })} />)}</div>
+                            <div className="col-md-4"><div className="form-check mb-2"><input className="form-check-input" type="checkbox" checked={alimentacion.ablactacion.checked} onChange={e => setAlimentacion({ ...alimentacion, ablactacion: { ...alimentacion.ablactacion, checked: e.target.checked } })} /><label className="form-check-label fw-bold">Ablactación</label></div>
+                            
+                            {/* PLACEHOLDER ACTUALIZADO EN ABLACTACIÓN */}
+                            {alimentacion.ablactacion.checked && (<input type="text" className="form-control form-control-sm" placeholder="Edad de inicio (meses)" value={alimentacion.ablactacion.edadInicio} onChange={e => setAlimentacion({ ...alimentacion, ablactacion: { ...alimentacion.ablactacion, edadInicio: e.target.value } })} />)}
+                            
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+            
+            {activeTab === "examenFisico" && (
+                <>
+                <div className="card bg-light mb-4 border-0">
+                    <div className="card-body p-3">
+                        <h6 className="text-primary mb-3 small fw-bold text-uppercase">A. Signos Vitales</h6>
+                        <div className="row g-3 text-center mb-3">
+                            <div className="col"><label className="small d-block fw-bold">Peso (kg)</label><input type="number" className="form-control form-control-sm text-center fw-bold text-primary" value={signosVitales.peso} onChange={e=>setSignosVitales({...signosVitales, peso:e.target.value})}/></div>
+                            <div className="col"><label className="small d-block fw-bold">Talla (cm)</label><input type="number" className="form-control form-control-sm text-center fw-bold text-primary" value={signosVitales.talla} onChange={e=>setSignosVitales({...signosVitales, talla:e.target.value})}/></div>
+                            <div className="col"><div className="form-check form-switch d-flex justify-content-center gap-2 mb-1"><input className="form-check-input" type="checkbox" checked={esMenor3Anios} onChange={e => setEsMenor3Anios(e.target.checked)}/><label className="small" style={{fontSize: '0.7rem'}}>¿≤ 3 años?</label></div>{esMenor3Anios ? (<input type="number" className="form-control form-control-sm text-center" placeholder="P. Cefálico" value={signosVitales.perimetroCefalico} onChange={e=>setSignosVitales({...signosVitales, perimetroCefalico:e.target.value})}/>) : (<input className="form-control form-control-sm text-center bg-light" disabled value="-" />)}</div>
+                            <div className="col"><label className="small d-block">Temp (°C)</label><input className="form-control form-control-sm text-center" value={signosVitales.temperatura} onChange={e=>setSignosVitales({...signosVitales, temperatura:e.target.value})}/></div>
+                            <div className="col"><label className="small d-block">FC (lpm)</label><input className="form-control form-control-sm text-center" value={signosVitales.fc} onChange={e=>setSignosVitales({...signosVitales, fc:e.target.value})}/></div>
+                            <div className="col"><label className="small d-block">FR (rpm)</label><input className="form-control form-control-sm text-center" value={signosVitales.fr} onChange={e=>setSignosVitales({...signosVitales, fr:e.target.value})}/></div>
+                            <div className="col"><label className="small d-block">SpO2 (%)</label><input className="form-control form-control-sm text-center" value={signosVitales.spo2} onChange={e=>setSignosVitales({...signosVitales, spo2:e.target.value})}/></div>
+                        </div>
+                        <div className="row g-3 mb-3 justify-content-center">
+                            <div className="col-md-3"><label className="small d-block fw-bold text-secondary">PA Sistólica</label><div className="input-group input-group-sm"><input type="number" className="form-control text-center" value={signosVitales.paSistolica} onChange={e=>setSignosVitales({...signosVitales, paSistolica:e.target.value})}/><span className="input-group-text">mmHg</span></div></div>
+                            <div className="col-md-3"><label className="small d-block fw-bold text-secondary">PA Diastólica</label><div className="input-group input-group-sm"><input type="number" className="form-control text-center" value={signosVitales.paDiastolica} onChange={e=>setSignosVitales({...signosVitales, paDiastolica:e.target.value})}/><span className="input-group-text">mmHg</span></div></div>
+                        </div>
+                        
+                        {/* ======================= NUEVA SECCIÓN DE PUNTUACIÓN Z ======================= */}
+                        <div className="row g-2 mt-2 pt-2 border-top">
+                            <div className="col-12"><h6 className="small fw-bold text-success mb-2">Evaluación Nutricional (Z-Score OMS)</h6></div>
+                            <div className="col-12">
+                                <div className="table-responsive bg-white border rounded">
+                                    <table className="table table-sm table-borderless align-middle m-0 text-center">
+                                        <thead>
+                                            <tr className="small text-muted bg-light border-bottom">
+                                                <th>Indicador</th>
+                                                <th>Valor Z</th>
+                                                <th>Interpretación</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            <tr>
+                                                <td className="small">Peso / Edad:</td>
+                                                <td className={zPesoEdad.color}>{zPesoEdad.valor}</td>
+                                                <td className="small">{zPesoEdad.interpretacion}</td>
+                                            </tr>
+                                            <tr>
+                                                <td className="small">Talla / Edad:</td>
+                                                <td className={zTallaEdad.color}>{zTallaEdad.valor}</td>
+                                                <td className="small">{zTallaEdad.interpretacion}</td>
+                                            </tr>
+                                            <tr>
+                                                <td className="small">IMC / Edad:</td>
+                                                <td className={zIMCEdad.color}>{zIMCEdad.valor}</td>
+                                                <td className="small">{zIMCEdad.interpretacion}</td>
+                                            </tr>
+                                            <tr className="border-top">
+                                                <td className="small fw-bold">IMC Actual:</td>
+                                                <td className="fw-bold">{resultadoIMC.valor}</td>
+                                                <td className={`small ${resultadoIMC.color}`}>{resultadoIMC.categoria}</td>
+                                            </tr>
+                                        </tbody>
+                                    </table>
+                                    
+                                    {/* ALERTA NUEVA PARA PACIENTE ADULTO */}
+                                    {(paciente && calcularEdadMeses(paciente.fechaNacimiento) > 228) && (
+                                        <div className="alert alert-warning m-2 py-1 small text-center">
+                                            <i className="bi bi-info-circle me-1"></i>
+                                            <strong>Nota:</strong> Este paciente es mayor de 19 años. No es un paciente pediátrico, por favor guíese únicamente por el IMC Actual.
+                                        </div>
+                                    )}
+                                    
+                                </div>
+                            </div>
+                        </div>
+                        {/* ========================================================================= */}
+
+                    </div>
+                </div>
+
+                <h6 className="text-primary mb-3 border-bottom pb-2">B. Examen Físico Segmentario</h6>
+                <div className="row g-4"><div className="col-md-6"><div className="card h-100 border-light shadow-sm"><div className="card-header bg-white fw-bold small">Aspecto General</div><div className="card-body"><input className="form-control form-control-sm mb-2" placeholder="Texto libre corto..." value={aspectoGeneralTexto} onChange={e=>setAspectoGeneralTexto(e.target.value)} /><div className="d-flex flex-wrap gap-2 mb-2">{['consciente', 'alerta', 'activo', 'decaido'].map(k => (<div className="form-check" key={k}><input className="form-check-input" type="checkbox" checked={aspectoGeneralChecks[k as keyof typeof aspectoGeneralChecks]} onChange={e => setAspectoGeneralChecks({...aspectoGeneralChecks, [k]: e.target.checked})} /><label className="form-check-label small text-capitalize">{k}</label></div>))}</div><div className="form-check mb-1"><input className="form-check-input" type="checkbox" checked={aspectoGeneralChecks.otros} onChange={e => setAspectoGeneralChecks({...aspectoGeneralChecks, otros: e.target.checked})} /><label className="form-check-label small">Otros</label></div>{aspectoGeneralChecks.otros && <input className="form-control form-control-sm mt-1" placeholder="Especifique..." value={aspectoGeneralOtros} onChange={e=>setAspectoGeneralOtros(e.target.value)} />}</div></div></div><div className="col-md-6"><div className="card h-100 border-light shadow-sm"><div className="card-header bg-white fw-bold small">Piel y Faneras</div><div className="card-body"><div className="d-flex flex-wrap gap-3 mb-2">{['ictericia', 'cianosis', 'rash'].map(k => (<div className="form-check" key={k}><input className="form-check-input" type="checkbox" checked={pielChecks[k as keyof typeof pielChecks]} onChange={e => setPielChecks({...pielChecks, [k]: e.target.checked})} /><label className="form-check-label small text-capitalize">{k}</label></div>))}</div><div className="form-check"><input className="form-check-input" type="checkbox" checked={pielChecks.otros} onChange={e => setPielChecks({...pielChecks, otros: e.target.checked})} /><label className="form-check-label small">Otros</label></div>{pielChecks.otros && <input className="form-control form-control-sm mt-1" placeholder="Especifique..." value={pielOtros} onChange={e=>setPielOtros(e.target.value)} />}</div></div></div><div className="col-md-6"><div className="card h-100 border-light shadow-sm"><div className="card-header bg-white fw-bold small">Cabeza y Cuello</div><div className="card-body"><div className="d-flex flex-wrap gap-3 mb-2"><div className="form-check"><input className="form-check-input" type="checkbox" checked={cabezaChecks.fontanela} onChange={e => setCabezaChecks({...cabezaChecks, fontanela: e.target.checked})} /><label className="form-check-label small">Fontanela anterior</label></div><div className="form-check"><input className="form-check-input" type="checkbox" checked={cabezaChecks.adenopatias} onChange={e => setCabezaChecks({...cabezaChecks, adenopatias: e.target.checked})} /><label className="form-check-label small">Adenopatías</label></div></div><div className="form-check"><input className="form-check-input" type="checkbox" checked={cabezaChecks.otros} onChange={e => setCabezaChecks({...cabezaChecks, otros: e.target.checked})} /><label className="form-check-label small">Otros</label></div>{cabezaChecks.otros && <input className="form-control form-control-sm mt-1" placeholder="Especifique..." value={cabezaOtros} onChange={e=>setCabezaOtros(e.target.value)} />}</div></div></div><div className="col-md-6"><div className="card h-100 border-light shadow-sm"><div className="card-header bg-white fw-bold small">Cardiopulmonar</div><div className="card-body"><div className="row g-2">{['Ruidos cardiacos', 'Murmullos vesiculares', 'Soplos', 'Crepitantes'].map((label, idx) => { const key = ['ruidos', 'murmullos', 'soplos', 'crepitantes'][idx]; return (<div className="col-6" key={key}><div className="form-check"><input className="form-check-input" type="checkbox" checked={cardioChecks[key as keyof typeof cardioChecks]} onChange={e => setCardioChecks({...cardioChecks, [key]: e.target.checked})} /><label className="form-check-label small">{label}</label></div></div>); })}</div></div></div></div><div className="col-md-6"><div className="card h-100 border-light shadow-sm"><div className="card-header bg-white fw-bold small">Abdomen</div><div className="card-body"><div className="row g-2">{['Blando', 'Depresible', 'Dolor a la palpación', 'Hepatomegalia', 'Esplenomegalia'].map((label, idx) => { const key = ['blando', 'depresible', 'dolor', 'hepatomegalia', 'esplenomegalia'][idx]; return (<div className="col-6" key={key}><div className="form-check"><input className="form-check-input" type="checkbox" checked={abdomenChecks[key as keyof typeof abdomenChecks]} onChange={e => setAbdomenChecks({...abdomenChecks, [key]: e.target.checked})} /><label className="form-check-label small">{label}</label></div></div>); })}</div></div></div></div><div className="col-md-6"><div className="card h-100 border-light shadow-sm"><div className="card-header bg-white fw-bold small">Neurológico</div><div className="card-body"><div className="d-flex flex-column gap-2"><div className="form-check"><input className="form-check-input" type="checkbox" checked={neuroChecks.reflejos} onChange={e => setNeuroChecks({...neuroChecks, reflejos: e.target.checked})} /><label className="form-check-label small">Reflejos osteotendinosos</label></div><div className="form-check"><input className="form-check-input" type="checkbox" checked={neuroChecks.estadoMental} onChange={e => setNeuroChecks({...neuroChecks, estadoMental: e.target.checked})} /><label className="form-check-label small">Estado mental</label></div><div className="form-check"><input className="form-check-input" type="checkbox" checked={neuroChecks.tono} onChange={e => setNeuroChecks({...neuroChecks, tono: e.target.checked})} /><label className="form-check-label small">Tono muscular</label></div></div></div></div></div><div className="col-12 mt-2"><label className="fw-bold text-success">Evolución Clínica</label><textarea className="form-control border-success" rows={3} value={evolucionClinica} onChange={e=>setEvolucionClinica(e.target.value)}/></div></div>
+                </>
+            )}
 
             {activeTab === "diagnostico" && (
                <>
